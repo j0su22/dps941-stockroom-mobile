@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Stockroom · Grupo Dtech",
+    "slug": "dps941-stockroom-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "stockroom",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.dtech.stockroom" },
+    "android": { "package": "com.dtech.stockroom" },
+    "web": { "bundler": "metro", "output": "single" },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-camera", { "cameraPermission": "Stockroom utiliza la cámara para identificar equipos por QR o código de barras.", "recordAudioAndroid": false }],
+      ["expo-image-picker", { "photosPermission": "Selecciona una evidencia de instalación para Stockroom.", "cameraPermission": "Toma una fotografía como evidencia de instalación.", "microphonePermission": false }]
+    ]
+  }
+}

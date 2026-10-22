@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+dist/
+web-build/
+android/
+ios/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+native-export/
