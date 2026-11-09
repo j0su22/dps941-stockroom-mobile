@@ -1,0 +1,19 @@
+{
+  "name": "stockroom-demo-tools",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.1"
+  },
+  "scripts": {
+    "seed": "npm run build && node scripts/seed.cjs",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^6.6.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "@types/node": "^22.0.0"
+  }
+}

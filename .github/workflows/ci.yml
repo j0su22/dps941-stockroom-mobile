@@ -12,6 +12,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm --prefix tools ci
+      - run: npm --prefix tools run build
       - run: npm run check
       - run: npx expo install --check
       - run: npm run export:web

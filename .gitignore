@@ -11,3 +11,13 @@ coverage/
 !.env.example
 .DS_Store
 native-export/
+
+google-services.json
+GoogleService-Info.plist
+*service-account*.json
+functions/lib/
+functions/node_modules/
+*-debug.log
+
+tools/lib/
+tools/node_modules/
