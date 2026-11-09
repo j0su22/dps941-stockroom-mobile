@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed() { return request.auth != null; }
+  function member() { return signed() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true; }
+  function admin() { return member() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN'; }
+  function movement(id) { return getAfter(/databases/$(database)/documents/movements/$(id)).data; }
+  function fresh(id) { return !exists(/databases/$(database)/documents/movements/$(id)); }
+  function assigned(m) {
+   let p = get(/databases/$(database)/documents/projects/$(m.projectId)).data;
+   let t = get(/databases/$(database)/documents/users/$(m.responsibleUserId)).data;
+   let actor = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+   return t.active == true && t.role == 'TECHNICIAN' && m.responsibleName == t.name
+    && m.responsibleUserId in p.technicianIds
+    && (m.type == 'RETURN' || p.status != 'CLOSED')
+    && (actor.role in ['ADMIN','WAREHOUSE'] || (actor.role == 'TECHNICIAN' && m.responsibleUserId == request.auth.uid));
+  }
+  match /users/{uid} {
+   allow get: if signed() && (request.auth.uid == uid || member());
+   allow list: if member();
+   allow create: if signed() && request.auth.uid == uid
+    && request.resource.data.keys().hasOnly(['id','name','email','role','active'])
+    && request.resource.data.id == uid && request.resource.data.email == request.auth.token.email
+    && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+    && request.resource.data.role == 'TECHNICIAN' && request.resource.data.active == true;
+   allow update: if signed() && request.auth.uid == uid
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+    && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80;
+   allow delete: if false;
+  }
+  match /projects/{id} {
+   allow read: if member();
+   allow update: if admin()
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['technicianIds','addedTechnicianId'])
+    && resource.data.status != 'CLOSED'
+    && request.resource.data.technicianIds is list
+    && request.resource.data.technicianIds.toSet() == resource.data.technicianIds.toSet().union([request.resource.data.addedTechnicianId].toSet())
+    && request.resource.data.technicianIds.size() == request.resource.data.technicianIds.toSet().size()
+    && get(/databases/$(database)/documents/users/$(request.resource.data.addedTechnicianId)).data.role == 'TECHNICIAN'
+    && get(/databases/$(database)/documents/users/$(request.resource.data.addedTechnicianId)).data.active == true;
+   allow create, delete: if false;
+  }
+  match /equipment/{id} {
+   allow read: if member();
+   allow create, delete: if false;
+   allow update: if member() && validEquipment();
+   function validEquipment() {
+    let n = request.resource.data;
+    let o = resource.data;
+    let m = movement(n.lastMovementId);
+    let returned = m.type == 'RETURN' && m.condition == 'GOOD';
+    let quarantine = m.type == 'RETURN' && m.condition in ['REVIEW','DAMAGED'];
+    return n.diff(o).affectedKeys().hasOnly(['stock','maintenanceStock','status','location','lastMovementId'])
+     && fresh(n.lastMovementId) && m.equipmentId == id && m.actorUserId == request.auth.uid
+     && n.stock is int && n.stock >= 0 && n.maintenanceStock is int && n.maintenanceStock >= 0
+     && n.stock == o.stock + (returned ? m.quantity : (m.type == 'EXIT' ? -m.quantity : 0))
+     && n.maintenanceStock == o.maintenanceStock + (quarantine ? m.quantity : 0)
+     && (o.kind != 'SERIALIZED' ? n.status == o.status && n.location == o.location
+       : m.quantity == 1
+        && (m.type != 'EXIT' || o.status == 'IN_STOCK')
+        && n.location == m.destination
+        && n.status == (m.type == 'EXIT' ? 'ASSIGNED' : (m.type == 'INSTALL' ? 'INSTALLED' : (returned ? 'IN_STOCK' : 'MAINTENANCE'))));
+   }
+  }
+  match /assignments/{id} {
+   allow read: if member();
+   allow delete: if false;
+   allow create: if member() && newAssignment();
+   function newAssignment() {
+    let a = request.resource.data;
+    let m = movement(a.lastMovementId);
+    return a.keys().hasOnly(['id','equipmentId','projectId','technicianId','quantity','installedQuantity','returnedQuantity','lastMovementId'])
+     && fresh(a.lastMovementId) && m.type == 'EXIT' && id == 'ASG-' + m.id
+     && a.id == id && m.assignmentId == id && m.actorUserId == request.auth.uid
+     && a.equipmentId == m.equipmentId && a.projectId == m.projectId && a.technicianId == m.responsibleUserId
+     && a.quantity == m.quantity && a.installedQuantity == 0 && a.returnedQuantity == 0;
+   }
+   allow update: if member() && changedAssignment();
+   function changedAssignment() {
+    let a = request.resource.data;
+    let o = resource.data;
+    let m = movement(a.lastMovementId);
+    return a.diff(o).affectedKeys().hasOnly(['installedQuantity','returnedQuantity','lastMovementId'])
+     && fresh(a.lastMovementId) && m.type in ['INSTALL','RETURN'] && m.assignmentId == id && m.actorUserId == request.auth.uid
+     && a.equipmentId == m.equipmentId && a.projectId == m.projectId && a.technicianId == m.responsibleUserId
+     && a.installedQuantity == o.installedQuantity + (m.type == 'INSTALL' ? m.quantity : 0)
+     && a.returnedQuantity == o.returnedQuantity + (m.type == 'RETURN' ? m.quantity : 0)
+     && a.installedQuantity + a.returnedQuantity <= a.quantity;
+   }
+  }
+  match /movements/{id} {
+   allow read: if member();
+   allow update, delete: if false;
+   allow create: if member() && validMovement();
+   function validMovement() {
+    let m = request.resource.data;
+    let e = getAfter(/databases/$(database)/documents/equipment/$(m.equipmentId)).data;
+    let a = getAfter(/databases/$(database)/documents/assignments/$(m.assignmentId)).data;
+    return m.keys().hasOnly(['id','type','equipmentId','assignmentId','projectId','quantity','origin','destination','responsibleUserId','responsibleName','actorUserId','date','notes','condition','reason','evidenceUri','createdAt'])
+     && m.id == id && m.actorUserId == request.auth.uid && m.createdAt == request.time
+     && m.type in ['EXIT','INSTALL','RETURN'] && m.quantity is int && m.quantity > 0
+     && m.notes is string && m.notes.size() <= 500
+     && m.destination is string && m.destination.size() > 0 && m.destination.size() <= 120
+     && m.date is string && m.date.size() <= 40
+     && m.origin == (m.type == 'EXIT' ? get(/databases/$(database)/documents/equipment/$(m.equipmentId)).data.location : get(/databases/$(database)/documents/projects/$(m.projectId)).data.name)
+     && (m.type != 'RETURN' || (m.condition in ['GOOD','REVIEW','DAMAGED'] && m.reason is string && m.reason.size() > 0 && m.reason.size() <= 200 && m.destination == 'Bodega principal'))
+     && (!('evidenceUri' in m) || (m.type == 'INSTALL' && m.evidenceUri is string && m.evidenceUri.size() <= 180000 && m.evidenceUri.matches('data:image/jpeg;base64,.*')))
+     && e.lastMovementId == id && a.lastMovementId == id
+     && a.equipmentId == m.equipmentId && a.projectId == m.projectId && a.technicianId == m.responsibleUserId
+     && assigned(m);
+   }
+  }
+  match /{document=**} { allow read, write: if false; }
+ }
+}

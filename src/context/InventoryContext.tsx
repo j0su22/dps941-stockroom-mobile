@@ -25,7 +25,10 @@ export function InventoryProvider({ children }: React.PropsWithChildren) {
     catch (e) { setError(errorMessage(e)); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    return inventoryService.subscribe(data => { setDb(data); setLoading(false); setError(''); }, e => { setError(errorMessage(e)); setLoading(false); });
+  }, [refresh]);
   return <Context.Provider value={{ db, users, loading, error, refresh,
     save: async input => setDb(await inventoryService.registerMovement(input)),
     addTechnician: async (p, t) => setDb(await inventoryService.addTechnician(p, t)),

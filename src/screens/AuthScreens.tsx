@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 import { Button, Field, Message } from '../components/UI';
 import { colors } from '../theme/theme';
@@ -14,31 +15,33 @@ function AuthLayout({ children, subtitle }: React.PropsWithChildren<{ subtitle: 
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 26, gap: 18, maxWidth: 500, width: '100%', alignSelf: 'center' }}>
       <View style={{ alignItems: 'center', gap: 10, marginBottom: 12 }}><View style={{ backgroundColor: colors.white, borderRadius: 50, padding: 14 }}><Ionicons name="radio-button-on" size={42} color={colors.blue} /></View><Text style={{ fontSize: 25, fontWeight: '800', letterSpacing: 2, color: colors.white }}>GRUPO DTECH</Text><Text style={{ color: '#C7D4FF' }}>Stockroom · {subtitle}</Text></View>
       {children}
-      <Text style={{ textAlign: 'center', color: '#C7D4FF', fontSize: 11 }}>DPS941 · Foro 1 · Avance móvil</Text>
+      <Text style={{ textAlign: 'center', color: '#C7D4FF', fontSize: 11 }}>DPS941 · Foro 2 · Firebase</Text>
     </ScrollView>
   </KeyboardAvoidingView></SafeAreaView>;
 }
 
 export function LoginScreen({ navigation }: NativeStackScreenProps<AuthParamList, 'Login'>) {
-  const { login } = useAuth();
+  const { login, google } = useAuth();
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [attempted, setAttempted] = useState(false);
   async function submit() {
     if (busy) return;
     setAttempted(true); setError('');
     if (validateEmail(email) || !password) return;
     setBusy(true);
-    try { await login(email, password, remember); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
+    try { await login(email, password, true); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   }
   return <AuthLayout subtitle="Inventario técnico">
     <Field dark label="Correo electrónico" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" maxLength={254} error={attempted ? validateEmail(email) : undefined} />
     <Field dark label="Contraseña" value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" maxLength={128} error={attempted && !password ? 'Ingresa tu contraseña.' : undefined} onSubmitEditing={() => void submit()} />
-    <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: remember }} onPress={() => setRemember(!remember)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 }}><Ionicons name={remember ? 'checkbox' : 'square-outline'} size={22} color={colors.yellow} /><Text style={{ color: colors.white }}>Recordarme durante 12 horas</Text></Pressable>
+
     {error ? <Message text={error} tone="error" /> : null}
     <Button title="Iniciar sesión" loading={busy} onPress={() => void submit()} />
+    <Button title="Continuar con Google" secondary disabled={busy} onPress={() => { setBusy(true); setError(''); void google().catch(e => setError(errorMessage(e))).finally(() => setBusy(false)); }} />
+    <Button title="Recuperar contraseña" secondary disabled={busy} onPress={() => { setBusy(true); setError(''); void authService.resetPassword(email).then(() => setError('Solicitud enviada. Revisa tu correo si existe una cuenta asociada.')).catch(e => setError(errorMessage(e))).finally(() => setBusy(false)); }} />
     <Button title="Crear cuenta de técnico" secondary disabled={busy} onPress={() => navigation.navigate('Register')} />
-    <Message text="Demostración local: tecnico@dtech.com · Stockroom2026! También disponibles admin@dtech.com y bodega@dtech.com con la misma contraseña. Utiliza solo datos de prueba." />
+    <Message text="Ingresa con tu cuenta de Stockroom o crea una cuenta de técnico." />
   </AuthLayout>;
 }
 
@@ -58,7 +61,7 @@ export function RegisterScreen({ navigation }: NativeStackScreenProps<AuthParamL
     <Field dark label="Correo electrónico" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" maxLength={254} error={attempted ? validateEmail(email) : undefined} />
     <Field dark label="Contraseña" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" maxLength={128} error={attempted ? validatePassword(password) : undefined} />
     <Field dark label="Confirmar contraseña" value={confirm} onChangeText={setConfirm} secureTextEntry maxLength={128} error={attempted && confirm !== password ? 'Las contraseñas no coinciden.' : undefined} />
-    <Message text="Las cuentas nuevas tienen rol Técnico. Administración debe asignarte a un proyecto para registrar operaciones. En este avance las cuentas existen únicamente en este dispositivo." />
+    <Message text="Las cuentas nuevas tienen rol Técnico. Administración debe asignarte a un proyecto para registrar operaciones. La cuenta y sus datos se almacenan en Firebase." />
     {error ? <Message text={error} tone="error" /> : null}
     <Button title="Registrarme" loading={busy} onPress={() => void submit()} /><Button title="Volver a iniciar sesión" secondary disabled={busy} onPress={() => navigation.goBack()} />
   </AuthLayout>;

@@ -32,7 +32,7 @@ export function HomeScreen() {
       return <EquipmentCard key={a.id} equipment={equipment} detail={`${pendingQuantity(a)} pendiente(s) · ${projects.find(p => p.id === a.projectId)?.name ?? 'Proyecto'}`} onPress={() => navigation.navigate('Equipment', { id: equipment.id })} />;
     })}
     <Button title="Consultar inventario completo" secondary onPress={() => navigation.navigate('Inventory')} />
-    <Message text="Avance local del Foro 1. Los cambios se guardan en este dispositivo; todavía no se sincronizan con la web ni con Firebase." />
+    <Message text="Firebase conectado. El inventario se actualiza en tiempo real." />
   </Screen>;
 }
 
@@ -90,7 +90,7 @@ export function ProfileScreen() {
   return <Screen><View style={[ui.card, { backgroundColor: colors.blue, borderColor: colors.blue }]}><View style={ui.row}><View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.yellow, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 19, fontWeight: '800', color: colors.blue }}>{user.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</Text></View><View style={{ flex: 1 }}><Text style={{ color: colors.white, fontSize: 21, fontWeight: '800' }}>{user.name}</Text><Text style={{ color: '#D7E0FF' }}>{roleLabel[user.role]}</Text></View></View><Text style={{ color: '#D7E0FF' }}>{user.email}</Text></View>
     <View style={ui.row}><View style={[ui.card, { flex: 1 }]}><Text style={ui.title}>{movements.length}</Text><Text style={ui.muted}>Movimientos visibles</Text></View><View style={[ui.card, { flex: 1 }]}><Text style={ui.title}>{assignments.reduce((n, a) => n + pendingQuantity(a), 0)}</Text><Text style={ui.muted}>Unidades pendientes</Text></View></View>
     <Button title="Mis movimientos registrados" secondary onPress={() => navigation.navigate('History')} /><Button title="Equipos bajo responsabilidad" secondary onPress={() => navigation.navigate('Inventory', { filter: 'MINE' })} /><Button title="Cambiar contraseña" secondary onPress={() => navigation.navigate('ChangePassword')} />
-    <Message text="Modo local · Sin sincronización con servidor. Las cuentas, movimientos y evidencias se conservan en este dispositivo. Cerrar sesión no elimina el inventario." />
+    <Message text="Datos compartidos del equipo Dtech en Firestore. La sesión usa Firebase Authentication; las evidencias se guardan como miniaturas en Firestore." />
     {error ? <Message text={error} tone="error" /> : null}<Button title="Cerrar sesión" danger onPress={() => setConfirm(true)} /><Confirm visible={confirm} title="Cerrar sesión" description="Se cerrará tu acceso y se conservarán los movimientos guardados." busy={busy} onCancel={() => setConfirm(false)} onConfirm={() => void exit()} />
   </Screen>;
 }

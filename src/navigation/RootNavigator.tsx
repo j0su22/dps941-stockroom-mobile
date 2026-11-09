@@ -38,7 +38,7 @@ function TabNavigator() {
 
 function AuthenticatedApp() {
   const { db, error, refresh } = useInventory(); const { logout } = useAuth();
-  if (!db && !error) return <Loading label="Preparando inventario local…" />;
+  if (!db && !error) return <Loading label="Consultando inventario en Firebase…" />;
   if (!db || error) return <Screen><Message text={error || 'No fue posible cargar los datos.'} tone="error" /><Button title="Reintentar" onPress={() => void refresh()} /><Button title="Cerrar sesión" secondary onPress={() => { void logout().catch(() => undefined); }} /></Screen>;
   return <RootStack.Navigator screenOptions={screenOptions}>
     <RootStack.Screen name="Main" component={TabNavigator} options={{ title: 'STOCKROOM · GRUPO DTECH' }} />
@@ -52,9 +52,9 @@ function AuthenticatedApp() {
 }
 
 export function RootNavigator() {
-  const { user, loading, error, initialize } = useAuth();
+  const { user, loading, error, initialize, logout } = useAuth();
   if (loading) return <Loading label="Preparando cuentas y sesión…" />;
-  if (error) return <Screen><Message text={error} tone="error" /><Button title="Reintentar" onPress={() => void initialize()} /></Screen>;
+  if (error) return <Screen><Message text={error} tone="error" /><Button title="Reintentar" onPress={() => void initialize()} /><Button title="Volver al inicio de sesión" secondary onPress={() => { void logout().then(() => initialize()); }} /></Screen>;
   return <NavigationContainer theme={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: colors.blue, background: colors.background } }}>
     {user ? <InventoryProvider key={user.id}><AuthenticatedApp /></InventoryProvider> : <AuthStack.Navigator screenOptions={{ headerShown: false }}><AuthStack.Screen name="Login" component={LoginScreen} /><AuthStack.Screen name="Register" component={RegisterScreen} /></AuthStack.Navigator>}
   </NavigationContainer>;
