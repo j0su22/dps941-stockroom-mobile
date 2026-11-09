@@ -1,99 +1,70 @@
-import * as Crypto from 'expo-crypto';
-import { pbkdf2Async } from '@noble/hashes/pbkdf2';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
-import { demoUsers } from '../data/seed';
+import { EmailAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 import { normalizeEmail, validateEmail, validateName, validatePassword } from '../domain/validation';
 import type { User } from '../types/models';
-import { exclusive, sessionStorage, storage } from './storage';
+import { firebaseServices } from './firebase';
+import { googleSignIn } from './googleSignIn';
 
-interface Account extends User { salt: string; passwordHash: string }
-interface Session { userId: string; expiresAt: number }
-const ACCOUNT_KEY = 'stockroom-accounts-v1';
-const DEMO_PASSWORD = 'Stockroom2026!';
-let currentSession: Session | null = null;
-const toUser = ({ id, name, email, role, active }: Account): User => ({ id, name, email, role, active });
-const hashPassword = async (password: string, salt: string) => bytesToHex(await pbkdf2Async(sha256, password, hexToBytes(salt), { c: 100_000, dkLen: 32 }));
-async function makeAccount(user: User, password: string): Promise<Account> {
-  const salt = bytesToHex(await Crypto.getRandomBytesAsync(16));
-  return { ...user, salt, passwordHash: await hashPassword(password, salt) };
-}
-async function accounts(): Promise<Account[]> {
-  const stored = await storage.read<Account[]>(ACCOUNT_KEY);
-  if (!Array.isArray(stored) || stored.some(a => !a.id || !a.salt || !a.passwordHash)) throw new Error('Las cuentas locales no están disponibles. Reinicia la aplicación o revisa el almacenamiento.');
-  return stored;
-}
-async function requireUser(): Promise<User> {
-  if (!currentSession || currentSession.expiresAt <= Date.now()) {
-    currentSession = null;
-    await sessionStorage.clear();
-    throw new Error('La sesión expiró. Cierra sesión y vuelve a ingresar.');
+async function profile(): Promise<User> {
+  const { auth, db } = firebaseServices();
+  const current = auth.currentUser;
+  if (!current) throw new Error('Inicia sesión para continuar.');
+  const reference = doc(db, 'users', current.uid);
+  let snapshot = await getDoc(reference);
+  if (!snapshot.exists()) {
+    const user: User = { id: current.uid, name: (current.displayName || current.email?.split('@')[0] || 'Técnico').slice(0, 80), email: current.email || '', role: 'TECHNICIAN', active: true };
+    await setDoc(reference, user);
+    snapshot = await getDoc(reference);
   }
-  const account = (await accounts()).find(a => a.id === currentSession!.userId && a.active);
-  if (!account) throw new Error('No tienes una sesión activa.');
-  return toUser(account);
-}
-async function openSession(user: User, remember: boolean): Promise<User> {
-  const session = { userId: user.id, expiresAt: Date.now() + 12 * 60 * 60 * 1000 };
-  if (remember) await sessionStorage.set(JSON.stringify(session));
-  else await sessionStorage.clear();
-  currentSession = session;
+  const user = snapshot.data() as User;
+  if (!user.active) throw new Error('Tu cuenta está inactiva. Contacta a administración.');
   return user;
 }
-
 export const authService = {
   async initialize(): Promise<User | null> {
-    await exclusive(async () => {
-      if (!(await storage.read<Account[]>(ACCOUNT_KEY))) {
-        const initial: Account[] = [];
-        for (const u of demoUsers) initial.push(await makeAccount(u, DEMO_PASSWORD));
-        await storage.write(ACCOUNT_KEY, initial);
-      }
-    });
-    const saved = await sessionStorage.get();
-    if (!saved) return null;
-    try {
-      const parsed = JSON.parse(saved) as Session;
-      if (typeof parsed.userId !== 'string' || typeof parsed.expiresAt !== 'number' || parsed.expiresAt <= Date.now()) throw new Error('expired');
-      currentSession = parsed;
-      return await requireUser();
-    } catch {
-      currentSession = null;
-      await sessionStorage.clear();
-      return null;
-    }
+    const { auth } = firebaseServices();
+    await auth.authStateReady();
+    return auth.currentUser ? profile() : null;
   },
-  async login(email: string, password: string, remember: boolean): Promise<User> {
-    const error = validateEmail(email);
+  observe(listener: (user: User | null) => void, error: (e: unknown) => void) {
+    return onAuthStateChanged(firebaseServices().auth, u => {
+      if (!u) listener(null);
+      else void profile().then(p => { if (firebaseServices().auth.currentUser?.uid === p.id) listener(p); }).catch(error);
+    }, error);
+  },
+  async login(email: string, password: string, _remember: boolean): Promise<User> {
+    const error = validateEmail(email); if (error) throw new Error(error);
+    await signInWithEmailAndPassword(firebaseServices().auth, normalizeEmail(email), password);
+    return profile();
+  },
+  async google(): Promise<User> { await googleSignIn(); return profile(); },
+  async register(name: string, email: string, password: string, confirmation: string): Promise<User> {
+    const error = validateName(name) || validateEmail(email) || validatePassword(password) || (password !== confirmation ? 'Las contraseñas no coinciden.' : undefined);
     if (error) throw new Error(error);
-    const account = (await accounts()).find(u => u.email === normalizeEmail(email) && u.active);
-    if (!account || password.length > 128 || account.passwordHash !== await hashPassword(password, account.salt)) throw new Error('Correo o contraseña incorrectos.');
-    return openSession(toUser(account), remember);
+    const { user } = await createUserWithEmailAndPassword(firebaseServices().auth, normalizeEmail(email), password);
+    await updateProfile(user, { displayName: name.trim() });
+    // onAuthStateChanged puede crear el perfil antes de terminar updateProfile.
+    await profile();
+    await setDoc(doc(firebaseServices().db, 'users', user.uid), { name: name.trim() }, { merge: true });
+    return profile();
   },
-  async register(name: string, email: string, password: string, confirm: string): Promise<User> {
-    const error = validateName(name) || validateEmail(email) || validatePassword(password) || (password !== confirm ? 'Las contraseñas no coinciden.' : undefined);
-    if (error) throw new Error(error);
-    return exclusive(async () => {
-      const all = await accounts();
-      if (all.some(u => u.email === normalizeEmail(email))) throw new Error('Ya existe una cuenta con este correo.');
-      const account = await makeAccount({ id: Crypto.randomUUID(), name: name.trim(), email: normalizeEmail(email), role: 'TECHNICIAN', active: true }, password);
-      await storage.write(ACCOUNT_KEY, [...all, account]);
-      return openSession(toUser(account), false);
-    });
+  requireUser: profile,
+  async getUsers(): Promise<User[]> {
+    await profile();
+    return (await getDocs(collection(firebaseServices().db, 'users'))).docs.map(d => d.data() as User);
   },
-  requireUser,
-  async getUsers(): Promise<User[]> { await requireUser(); return (await accounts()).map(toUser); },
-  async logout(): Promise<void> { await sessionStorage.clear(); currentSession = null; },
-  async changePassword(oldPassword: string, password: string, confirmation: string): Promise<void> {
-    const user = await requireUser();
+  async resetPassword(email: string) {
+    const error = validateEmail(email); if (error) throw new Error(error);
+    await sendPasswordResetEmail(firebaseServices().auth, normalizeEmail(email));
+  },
+  async logout() { await signOut(firebaseServices().auth); },
+  async changePassword(oldPassword: string, password: string, confirmation: string) {
     const error = validatePassword(password) || (password !== confirmation ? 'Las contraseñas no coinciden.' : undefined);
     if (error) throw new Error(error);
-    await exclusive(async () => {
-      const all = await accounts();
-      const old = all.find(a => a.id === user.id)!;
-      if (await hashPassword(oldPassword, old.salt) !== old.passwordHash) throw new Error('La contraseña actual es incorrecta.');
-      const replacement = await makeAccount(user, password);
-      await storage.write(ACCOUNT_KEY, all.map(a => a.id === user.id ? replacement : a));
-    });
+    const { currentUser } = firebaseServices().auth;
+    if (!currentUser?.email) throw new Error('No hay una sesión activa.');
+    if (!currentUser.providerData.some(p => p.providerId === 'password')) throw new Error('Tu cuenta utiliza Google. Administra la contraseña desde tu cuenta Google.');
+    await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, oldPassword));
+    await updatePassword(currentUser, password);
   },
 };

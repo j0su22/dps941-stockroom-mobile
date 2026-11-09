@@ -10,6 +10,7 @@ interface AuthState {
   error: string;
   initialize: () => Promise<void>;
   login: (email: string, password: string, remember: boolean) => Promise<void>;
+  google: () => Promise<void>;
   register: (name: string, email: string, password: string, confirm: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -23,7 +24,13 @@ export function AuthProvider({ children }: React.PropsWithChildren) {
     try { setUser(await authService.initialize()); } catch (e) { setError(errorMessage(e)); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { void initialize(); }, [initialize]);
+  useEffect(() => {
+    void initialize();
+    let stop: (() => void) | undefined;
+    try { stop = authService.observe(u => { setUser(u); setError(''); }, e => setError(errorMessage(e))); }
+    catch (e) { setError(errorMessage(e)); }
+    return () => stop?.();
+  }, [initialize]);
   useEffect(() => {
     if (!user) return;
     const verify = () => { void authService.requireUser().catch(() => setUser(null)); };
@@ -33,6 +40,7 @@ export function AuthProvider({ children }: React.PropsWithChildren) {
   }, [user]);
   return <Context.Provider value={{ user, loading, error, initialize,
     login: async (e, p, r) => setUser(await authService.login(e, p, r)),
+    google: async () => setUser(await authService.google()),
     register: async (n, e, p, c) => setUser(await authService.register(n, e, p, c)),
     logout: async () => { await authService.logout(); setUser(null); },
   }}>{children}</Context.Provider>;
